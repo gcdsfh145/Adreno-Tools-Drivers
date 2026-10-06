@@ -156,6 +156,20 @@ open(p, "w").write(s)
 print("tu_wsi.h patched")
 PYEOF
     grep -q 'VK_USE_PLATFORM_ANDROID_KHR' src/freedreno/vulkan/tu_wsi.h || die "tu_wsi.h Android WSI patch failed"
+
+    # For Android we must also compile tu_wsi.cc, otherwise tu_device.cc's
+    # reference to tu_wsi_init/tu_wsi_finish fails to link.
+    log "Enabling tu_wsi.cc for Android build..."
+    python3 - <<'PYEOF'
+p = "src/freedreno/vulkan/meson.build"
+s = open(p).read()
+old = "if system_has_kms_drm and not with_platform_android\n  tu_wsi = true\nendif"
+new = "if system_has_kms_drm and not with_platform_android\n  tu_wsi = true\nendif\n\nif with_platform_android\n  tu_wsi = true\nendif"
+assert old in s, "meson.build anchor not found"
+open(p, "w").write(s.replace(old, new))
+print("meson.build patched")
+PYEOF
+    grep -q "with_platform_android" src/freedreno/vulkan/meson.build || die "meson.build Android WSI patch failed"
 }
 
 configure_variant() {
