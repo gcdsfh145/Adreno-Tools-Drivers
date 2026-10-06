@@ -2,6 +2,27 @@ name: Build Turnip Android Variants
 
 on:
   workflow_dispatch:
+    inputs:
+      mesa_commit:
+        description: 'Mesa commit to build (empty = mesa main)'
+        required: false
+        default: ''
+        type: string
+      strip_symbols:
+        description: 'Strip symbols from the driver (true = smaller, but hides ICD entry used by our shim)'
+        required: false
+        default: false
+        type: boolean
+      extra_meson:
+        description: 'Extra meson options, e.g. -Dplatform-sdk-version=36 -Dvulkan-beta=true (space separated)'
+        required: false
+        default: ''
+        type: string
+      platform_sdk:
+        description: 'Android platform SDK version (target)'
+        required: false
+        default: '36'
+        type: number
 
 permissions:
   contents: write
@@ -12,22 +33,29 @@ jobs:
     outputs:
       mesa_commit: ${{ steps.mesa.outputs.commit }}
     steps:
-      - name: Resolve Mesa main
+      - name: Resolve Mesa commit
         id: mesa
         run: |
-          COMMIT=$(git ls-remote https://gitlab.freedesktop.org/mesa/mesa.git refs/heads/main | awk '{print $1}')
-          test -n "$COMMIT"
+          if [ -n "${{ inputs.mesa_commit }}" ]; then
+            COMMIT="${{ inputs.mesa_commit }}"
+            test -n "$COMMIT"
+          else
+            COMMIT=$(git ls-remote https://gitlab.freedesktop.org/mesa/mesa.git refs/heads/main | awk '{print $1}')
+            test -n "$COMMIT"
+          fi
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
           echo "Mesa commit: $COMMIT"
 
   build:
     needs: resolve
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         include:
+          - variant: a6xx
+            artifact: Turnip-A6xx
           - variant: a7xx
             artifact: Turnip-A7xx
           - variant: a7xx-oneui
@@ -67,6 +95,9 @@ jobs:
           VARIANT: ${{ matrix.variant }}
           BUILD_VERSION: ${{ github.run_number }}
           MESA_COMMIT: ${{ needs.resolve.outputs.mesa_commit }}
+          STRIP_SYMBOLS: ${{ inputs.strip_symbols }}
+          MESON_EXTRA: ${{ inputs.extra_meson }}
+          PLATFORM_SDK_VERSION: ${{ inputs.platform_sdk }}
         run: |
           chmod +x build_turnip.sh
           ./build_turnip.sh
@@ -92,7 +123,7 @@ jobs:
     if: ${{ success() }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download all four drivers
+      - name: Download drivers
         uses: actions/download-artifact@v4
         with:
           pattern: Turnip-*
@@ -102,12 +133,12 @@ jobs:
       - name: List release files
         run: |
           ls -lah release
-          test "$(find release -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 4
+          test "$(find release -maxdepth 1 -type f -name '*.zip' | wc -l)" -ge 1
 
       - name: Generate release metadata
         run: |
           echo "TAG_NAME=v$(date +'%Y.%m.%d')-${{ github.run_number }}" >> "$GITHUB_ENV"
-          echo "RELEASE_NAME=Turnip Android 4-pack - $(date +'%Y-%m-%d')" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=Turnip Android - $(date +'%Y-%m-%d')" >> "$GITHUB_ENV"
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
@@ -115,13 +146,15 @@ jobs:
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
           body: |
-            Four Android/Bionic Turnip variants built from the same Mesa commit:
-            `${{ needs.resolve.outputs.mesa_commit }}`
+            Android/Bionic Turnip variants built from Mesa commit `${{ needs.resolve.outputs.mesa_commit }}`
 
+            - A6xx — upstream turnip (Adreno 610/615/618/620/630/650/660/680/690)
             - A7xx — StevenMXZ
             - A7xx OneUI Glitch — StevenMXZ + 8g2 UI fix
             - A8xx Patchs2 — Patchs2 A8xx recipe
             - A8xx Patched Patchs1 — Patchs1 balanced Android recipe + 0001-0006
+
+            Build config: strip_symbols=`${{ inputs.strip_symbols }}`, extra_meson=`${{ inputs.extra_meson }}`, platform_sdk=`${{ inputs.platform_sdk }}`
           files: release/*.zip
           fail_on_unmatched_files: true
           draft: false

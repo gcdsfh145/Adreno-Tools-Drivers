@@ -12,6 +12,9 @@ NDK="$WORKDIR/$NDKVER/toolchains/llvm/prebuilt/linux-x86_64/bin"
 BUILD_VERSION="${BUILD_VERSION:-1.0}"
 VARIANT="${VARIANT:-a7xx}"
 MESA_COMMIT="${MESA_COMMIT:-}"
+STRIP_SYMBOLS="${STRIP_SYMBOLS:-false}"
+MESON_EXTRA="${MESON_EXTRA:-}"
+PLATFORM_SDK_VERSION="${PLATFORM_SDK_VERSION:-36}"
 
 REVERT_COMMIT="a70d2af590db192f87b3af01f83a68b450edb4c3"
 
@@ -139,6 +142,9 @@ apply_android_ndk_fixes() {
 
 configure_variant() {
     case "$VARIANT" in
+        a6xx)
+            log "A6xx: pure upstream turnip, no variant patches applied"
+            ;;
         a7xx)
             apply_a7xx_base
             ;;
@@ -168,7 +174,8 @@ configure_variant() {
 }
 
 build_android() {
-    local cver=36
+    local cver="$PLATFORM_SDK_VERSION"
+    [ -f "$NDK/aarch64-linux-android${cver}-clang" ] || cver=36
     [ -f "$NDK/aarch64-linux-android${cver}-clang" ] || cver=35
     [ -f "$NDK/aarch64-linux-android${cver}-clang" ] || cver=34
     [ -f "$NDK/aarch64-linux-android${cver}-clang" ] || die "Android aarch64 Clang not found"
@@ -224,7 +231,17 @@ EOF
     local output_dir="/tmp/turnip-$VARIANT"
     rm -rf "$build_dir" "$output_dir"
 
-    meson setup "$build_dir"         --cross-file android-aarch64.txt         --native-file native.txt         --prefix "$output_dir"         -Dbuildtype=release         -Dstrip=true         -Dplatforms=android         -Dvideo-codecs=         -Dplatform-sdk-version=36         -Dandroid-stub=true         -Dgallium-drivers=         -Dvulkan-drivers=freedreno         -Dvulkan-beta=true         -Dfreedreno-kmds=kgsl         -Degl=disabled         -Dandroid-libbacktrace=disabled
+    local strip_opt
+    if [ "$STRIP_SYMBOLS" = "true" ]; then
+        strip_opt="true"
+    else
+        strip_opt="false"
+    fi
+    log "strip=$strip_opt platform_sdk=$cver"
+    log "extra meson options: ${MESON_EXTRA:-<none>}"
+
+    # shellcheck disable=SC2086
+    meson setup "$build_dir"         --cross-file android-aarch64.txt         --native-file native.txt         --prefix "$output_dir"         -Dbuildtype=release         -Dstrip=$strip_opt         -Dplatforms=android         -Dvideo-codecs=         -Dplatform-sdk-version=$cver         -Dandroid-stub=true         -Dgallium-drivers=         -Dvulkan-drivers=freedreno         -Dvulkan-beta=true         -Dfreedreno-kmds=kgsl         -Degl=disabled         -Dandroid-libbacktrace=disabled         $MESON_EXTRA
 
     ninja -C "$build_dir" install
 
@@ -237,6 +254,11 @@ package_variant() {
 
     local pretty_name desc suffix
     case "$VARIANT" in
+        a6xx)
+            pretty_name="Turnip A6xx"
+            desc="Upstream turnip A6xx Android/Bionic (Adreno 610/615/618/620/630/650/660/680/690)"
+            suffix="A6xx"
+            ;;
         a7xx)
             pretty_name="Turnip A7xx"
             desc="StevenMXZ A7xx Android/Bionic — revert D32S8 + has_early_preamble=False"
