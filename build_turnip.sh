@@ -138,6 +138,24 @@ apply_android_ndk_fixes() {
     sed -i -E 's/([a-z_]+)->handle->/((const native_handle_t *)\1->handle)->/g' src/vulkan/runtime/vk_android.c || true
     sed -i 's/anb->handle->/((const native_handle_t *)anb->handle)->/g' src/vulkan/runtime/vk_android.c || true
     sed -i "/-Werror=gnu-empty-initializer/d" meson.build || true
+
+    # Enable the WSI platform flag for Android so Vulkan exposes
+    # VK_KHR_surface / VK_KHR_swapchain on Android.  Upstream tu_wsi.h only
+    # enables WSI when building for X11/Wayland/DRM; Android builds therefore
+    # advertise neither surface nor swapchain even though a KHR swapchain
+    # implementation is compiled in.
+    log "Enabling Android WSI platform (tu_wsi.h)..."
+    python3 - <<'PYEOF'
+import re
+p = "src/freedreno/vulkan/tu_wsi.h"
+s = open(p).read()
+anchor = "defined(VK_USE_PLATFORM_DISPLAY_KHR)"
+if "VK_USE_PLATFORM_ANDROID_KHR" not in s:
+    s = s.replace(anchor, anchor + " || \\\n    defined(VK_USE_PLATFORM_ANDROID_KHR)")
+open(p, "w").write(s)
+print("tu_wsi.h patched")
+PYEOF
+    grep -q 'VK_USE_PLATFORM_ANDROID_KHR' src/freedreno/vulkan/tu_wsi.h || die "tu_wsi.h Android WSI patch failed"
 }
 
 configure_variant() {
